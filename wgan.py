@@ -36,49 +36,77 @@ img_shape = (opt.channels, opt.img_size, opt.img_size)
 
 cuda = True if torch.cuda.is_available() else False
 
+leak = 0.1
+w_g = 4
 
 class Generator(nn.Module):
     def __init__(self):
         super(Generator, self).__init__()
 
-        def block(in_feat, out_feat, normalize=True):
-            layers = [nn.Linear(in_feat, out_feat)]
-            if normalize:
-                layers.append(nn.BatchNorm1d(out_feat, 0.8))
-            layers.append(nn.LeakyReLU(0.2, inplace=True))
-            return layers
+#         def block(in_feat, out_feat, normalize=True):
+#             layers = [nn.Conv2d(in_feat, out_feat, stride=3)]
+#             if normalize:
+#                 layers.append(nn.BatchNorm1d(out_feat, 0.8))
+#             layers.append(nn.LeakyReLU(0.2, inplace=True))
+#             return layers
 
+#         self.model = nn.Sequential(
+#             *block(opt.latent_dim, 128, normalize=False),
+#             *block(128, 256),
+#             *block(256, 512),
+#             *block(512, 1024),
+#             nn.Linear(1024, int(np.prod(img_shape))),
+#             nn.Tanh()
+#         )
         self.model = nn.Sequential(
-            *block(opt.latent_dim, 128, normalize=False),
-            *block(128, 256),
-            *block(256, 512),
-            *block(512, 1024),
-            nn.Linear(1024, int(np.prod(img_shape))),
+            nn.ConvTranspose2d(opt.latent_dim, 512, 4, stride=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(),
+            nn.ConvTranspose2d(512, 256, 4, stride=2, padding=(1,1)),
+            nn.BatchNorm2d(256),
+            nn.ReLU(),
+            nn.ConvTranspose2d(256, 128, 4, stride=2, padding=(1,1)),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.ConvTranspose2d(128, 64, 4, stride=2, padding=(1,1)),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.ConvTranspose2d(64, opt.channels, 3, stride=1, padding=(1,1)),
             nn.Tanh()
         )
+        
 
     def forward(self, z):
-        img = self.model(z)
-        img = img.view(img.shape[0], *img_shape)
-        return img
+        return self.model(z.view(-1, self.z_dim, 1, 1))
 
 
 class Discriminator(nn.Module):
     def __init__(self):
         super(Discriminator, self).__init__()
 
-        self.model = nn.Sequential(
-            nn.Linear(int(np.prod(img_shape)), 512),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(512, 256),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(256, 1),
-        )
+        self.conv1 = nn.Conv2d(opt.channels, 64, 3, stride=1, padding=(1,1))
 
-    def forward(self, img):
-        img_flat = img.view(img.shape[0], -1)
-        validity = self.model(img_flat)
-        return validity
+        self.conv2 = nn.Conv2d(64, 64, 4, stride=2, padding=(1,1))
+        self.conv3 = nn.Conv2d(64, 128, 3, stride=1, padding=(1,1))
+        self.conv4 = nn.Conv2d(128, 128, 4, stride=2, padding=(1,1))
+        self.conv5 = nn.Conv2d(128, 256, 3, stride=1, padding=(1,1))
+        self.conv6 = nn.Conv2d(256, 256, 4, stride=2, padding=(1,1))
+        self.conv7 = nn.Conv2d(256, 512, 3, stride=1, padding=(1,1))
+
+
+        self.fc = nn.Linear(w_g * w_g * 512, 1)
+
+    def forward(self, x):
+        m = x
+        m = nn.LeakyReLU(leak)(self.conv1(m))
+        m = nn.LeakyReLU(leak)(self.conv2(m))
+        m = nn.LeakyReLU(leak)(self.conv3(m))
+        m = nn.LeakyReLU(leak)(self.conv4(m))
+        m = nn.LeakyReLU(leak)(self.conv5(m))
+        m = nn.LeakyReLU(leak)(self.conv6(m))
+        m = nn.LeakyReLU(leak)(self.conv7(m))
+
+        return self.fc(m.view(-1,w_g * w_g * 512))
 
 
 # Initialize generator and discriminator
@@ -117,9 +145,12 @@ dataloader = torch.utils.data.DataLoader(
 
 
 
-# Optimizers
-optimizer_G = torch.optim.RMSprop(generator.parameters(), lr=opt.lr)
-optimizer_D = torch.optim.RMSprop(discriminator.parameters(), lr=opt.lr)
+# # Optimizers
+# optimizer_G = torch.optim.RMSprop(generator.parameters(), lr=opt.lr)
+# optimizer_D = torch.optim.RMSprop(discriminator.parameters(), lr=opt.lr)
+optimizer_G = torch.optim.Adam(generator.parameters(), lr=opt.lr, betas=(0.0, 0.9))
+optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=opt.lr, betas=(0.0,0.9))
+
 
 Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 
