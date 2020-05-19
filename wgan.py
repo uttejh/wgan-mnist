@@ -77,7 +77,7 @@ class Generator(nn.Module):
         
 
     def forward(self, z):
-        return self.model(z.view(-1, self.z_dim, 1, 1))
+        return self.model(z.view(-1, self.latent_dim, 1, 1))
 
 
 class Discriminator(nn.Module):
